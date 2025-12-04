@@ -2,16 +2,16 @@ import { createSignal, For, Show, createEffect } from "solid-js";
 import { Button, Switch } from "../components/ui";
 import { appStore } from "../stores/app";
 import { toastStore } from "../stores/toast";
-import { saveConfig } from "../lib/tauri";
-import type { AmpOpenAIModel, AmpOpenAIProvider } from "../lib/tauri";
+import { saveConfig, AMP_MODEL_SLOTS } from "../lib/tauri";
+import type {
+  AmpOpenAIModel,
+  AmpOpenAIProvider,
+  AmpModelMapping,
+} from "../lib/tauri";
 
 export function SettingsPage() {
   const { config, setConfig, setCurrentPage, authStatus } = appStore;
   const [saving, setSaving] = createSignal(false);
-
-  // Simple model mappings state
-  const [newMappingFrom, setNewMappingFrom] = createSignal("");
-  const [newMappingTo, setNewMappingTo] = createSignal("");
 
   // OpenAI provider state
   const [providerName, setProviderName] = createSignal("");
@@ -33,6 +33,94 @@ export function SettingsPage() {
       setProviderModels(provider.models || []);
     }
   });
+
+  // Helper to get mapping for a slot
+  const getMappingForSlot = (slotId: string) => {
+    const slot = AMP_MODEL_SLOTS.find((s) => s.id === slotId);
+    if (!slot) return null;
+    const mappings = config().ampModelMappings || [];
+    return mappings.find((m) => m.from === slot.fromModel);
+  };
+
+  // Update mapping for a slot
+  const updateSlotMapping = async (
+    slotId: string,
+    toModel: string,
+    enabled: boolean,
+  ) => {
+    const slot = AMP_MODEL_SLOTS.find((s) => s.id === slotId);
+    if (!slot) return;
+
+    const currentMappings = config().ampModelMappings || [];
+    // Remove existing mapping for this slot
+    const filteredMappings = currentMappings.filter(
+      (m) => m.from !== slot.fromModel,
+    );
+
+    // Add new mapping if enabled and has a target
+    let newMappings: AmpModelMapping[];
+    if (enabled && toModel) {
+      newMappings = [
+        ...filteredMappings,
+        { from: slot.fromModel, to: toModel, enabled: true },
+      ];
+    } else {
+      newMappings = filteredMappings;
+    }
+
+    const newConfig = { ...config(), ampModelMappings: newMappings };
+    setConfig(newConfig);
+
+    setSaving(true);
+    try {
+      await saveConfig(newConfig);
+      toastStore.success("Model mapping updated");
+    } catch (error) {
+      console.error("Failed to save config:", error);
+      toastStore.error("Failed to save settings", String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Get list of available target models (from OpenAI provider aliases + built-in models)
+  const getAvailableTargetModels = () => {
+    const models: { value: string; label: string }[] = [];
+
+    // Add models from OpenAI provider aliases
+    const provider = config().ampOpenaiProvider;
+    if (provider?.models) {
+      for (const model of provider.models) {
+        if (model.alias) {
+          models.push({
+            value: model.alias,
+            label: `${model.alias} (${provider.name})`,
+          });
+        } else {
+          models.push({
+            value: model.name,
+            label: `${model.name} (${provider.name})`,
+          });
+        }
+      }
+    }
+
+    // Add some common built-in models
+    const builtInModels = [
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+      { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+      { value: "gpt-4.1", label: "GPT-4.1" },
+      { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+      { value: "gpt-4o", label: "GPT-4o" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+      { value: "o3", label: "o3" },
+      { value: "o4-mini", label: "o4 Mini" },
+      { value: "qwen3-235b-a22b", label: "Qwen3 235B" },
+    ];
+
+    return [...models, ...builtInModels];
+  };
 
   const handleConfigChange = async (
     key: keyof ReturnType<typeof config>,
@@ -58,52 +146,6 @@ export function SettingsPage() {
     const auth = authStatus();
     return [auth.claude, auth.openai, auth.gemini, auth.qwen].filter(Boolean)
       .length;
-  };
-
-  const addModelMapping = async () => {
-    const from = newMappingFrom().trim();
-    const to = newMappingTo().trim();
-    if (!from || !to) {
-      toastStore.error("Both 'from' and 'to' model names are required");
-      return;
-    }
-    const currentMappings = config().ampModelMappings || [];
-    const newConfig = {
-      ...config(),
-      ampModelMappings: [...currentMappings, { from, to }],
-    };
-    setConfig(newConfig);
-    setNewMappingFrom("");
-    setNewMappingTo("");
-
-    setSaving(true);
-    try {
-      await saveConfig(newConfig);
-      toastStore.success("Model mapping added");
-    } catch (error) {
-      console.error("Failed to save config:", error);
-      toastStore.error("Failed to save settings", String(error));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeModelMapping = async (index: number) => {
-    const currentMappings = config().ampModelMappings || [];
-    const newMappings = currentMappings.filter((_, i) => i !== index);
-    const newConfig = { ...config(), ampModelMappings: newMappings };
-    setConfig(newConfig);
-
-    setSaving(true);
-    try {
-      await saveConfig(newConfig);
-      toastStore.success("Model mapping removed");
-    } catch (error) {
-      console.error("Failed to save config:", error);
-      toastStore.error("Failed to save settings", String(error));
-    } finally {
-      setSaving(false);
-    }
   };
 
   const addProviderModel = () => {
@@ -378,104 +420,100 @@ export function SettingsPage() {
                     Model Mappings
                   </span>
                   <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    Map Amp model requests to different models (e.g.,
-                    claude-opus → gemini-pro)
+                    Route Amp model requests to different providers
                   </p>
                 </div>
 
-                {/* Existing mappings */}
-                <For each={config().ampModelMappings || []}>
-                  {(mapping, index) => (
-                    <div class="flex items-center gap-2 p-2 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <div class="flex-1 flex items-center gap-2 text-xs font-mono overflow-hidden">
-                        <span
-                          class="text-gray-500 dark:text-gray-400 truncate"
-                          title={mapping.from}
-                        >
-                          {mapping.from}
-                        </span>
-                        <svg
-                          class="w-4 h-4 text-gray-400 flex-shrink-0"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M13 7l5 5m0 0l-5 5m5-5H6"
-                          />
-                        </svg>
-                        <span
-                          class="text-gray-700 dark:text-gray-300 truncate"
-                          title={mapping.to}
-                        >
-                          {mapping.to}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeModelMapping(index())}
-                        class="p-1 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
-                        title="Remove mapping"
-                      >
-                        <svg
-                          class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </For>
+                {/* Slot-based mappings */}
+                <div class="space-y-2">
+                  <For each={AMP_MODEL_SLOTS}>
+                    {(slot) => {
+                      const mapping = () => getMappingForSlot(slot.id);
+                      const isEnabled = () => !!mapping();
+                      const currentTarget = () => mapping()?.to || "";
 
-                {/* Add new mapping */}
-                <div class="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={newMappingFrom()}
-                    onInput={(e) => setNewMappingFrom(e.currentTarget.value)}
-                    placeholder="From (e.g. claude-opus-4-5-20251101)"
-                    class="flex-1 px-2 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
-                  />
-                  <input
-                    type="text"
-                    value={newMappingTo()}
-                    onInput={(e) => setNewMappingTo(e.currentTarget.value)}
-                    placeholder="To (e.g. gemini-2.0-flash)"
-                    class="flex-1 px-2 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
-                  />
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={addModelMapping}
-                    disabled={
-                      !newMappingFrom().trim() || !newMappingTo().trim()
-                    }
-                  >
-                    <svg
-                      class="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 4v16m8-8H4"
-                      />
-                    </svg>
-                  </Button>
+                      return (
+                        <div class="flex items-center gap-3 p-3 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                          {/* Checkbox */}
+                          <input
+                            type="checkbox"
+                            checked={isEnabled()}
+                            onChange={(e) => {
+                              const checked = e.currentTarget.checked;
+                              if (checked) {
+                                // Enable with first available target or same model
+                                const targets = getAvailableTargetModels();
+                                const defaultTarget =
+                                  targets[0]?.value || slot.fromModel;
+                                updateSlotMapping(slot.id, defaultTarget, true);
+                              } else {
+                                updateSlotMapping(slot.id, "", false);
+                              }
+                            }}
+                            class="w-4 h-4 text-brand-500 bg-gray-100 border-gray-300 rounded focus:ring-brand-500 dark:focus:ring-brand-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                          />
+
+                          {/* Slot name */}
+                          <span class="w-16 text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {slot.name}
+                          </span>
+
+                          {/* From model (readonly) */}
+                          <div class="flex-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-600 dark:text-gray-400">
+                            {slot.fromLabel}
+                          </div>
+
+                          {/* Arrow */}
+                          <span class="text-gray-400 text-sm">TO</span>
+
+                          {/* To model (dropdown) */}
+                          <select
+                            value={currentTarget()}
+                            onChange={(e) => {
+                              const newTarget = e.currentTarget.value;
+                              updateSlotMapping(slot.id, newTarget, true);
+                            }}
+                            disabled={!isEnabled()}
+                            class={`flex-1 px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth ${
+                              !isEnabled()
+                                ? "opacity-50 cursor-not-allowed"
+                                : ""
+                            }`}
+                          >
+                            <option value="">Select target model...</option>
+                            <Show when={getAvailableTargetModels().length > 0}>
+                              <optgroup label="Custom Provider">
+                                <For
+                                  each={getAvailableTargetModels().filter((m) =>
+                                    m.label.includes("("),
+                                  )}
+                                >
+                                  {(model) => (
+                                    <option value={model.value}>
+                                      {model.label}
+                                    </option>
+                                  )}
+                                </For>
+                              </optgroup>
+                            </Show>
+                            <optgroup label="Built-in Models">
+                              <For
+                                each={getAvailableTargetModels().filter(
+                                  (m) => !m.label.includes("("),
+                                )}
+                              >
+                                {(model) => (
+                                  <option value={model.value}>
+                                    {model.label}
+                                  </option>
+                                )}
+                              </For>
+                            </optgroup>
+                          </select>
+                        </div>
+                      );
+                    }}
+                  </For>
                 </div>
               </div>
 

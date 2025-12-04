@@ -79,7 +79,38 @@ export async function refreshAuthStatus(): Promise<AuthStatus> {
 export interface AmpModelMapping {
   from: string;
   to: string;
+  enabled?: boolean; // Whether this mapping is active
 }
+
+// Predefined Amp model slots with friendly names
+export interface AmpModelSlot {
+  id: string;
+  name: string; // Friendly display name: "Smart", "Rush", "Oracle"
+  fromModel: string; // Actual Amp model identifier
+  fromLabel: string; // Friendly label for the source model
+}
+
+// Default Amp model slots (these are the models Amp CLI uses)
+export const AMP_MODEL_SLOTS: AmpModelSlot[] = [
+  {
+    id: "smart",
+    name: "Smart",
+    fromModel: "claude-sonnet-4-20250514",
+    fromLabel: "Claude Sonnet 4",
+  },
+  {
+    id: "rush",
+    name: "Rush",
+    fromModel: "claude-haiku-4-20250514",
+    fromLabel: "Claude Haiku 4",
+  },
+  {
+    id: "oracle",
+    name: "Oracle",
+    fromModel: "claude-opus-4-20250514",
+    fromLabel: "Claude Opus 4",
+  },
+];
 
 // OpenAI-compatible model for Amp routing
 export interface AmpOpenAIModel {

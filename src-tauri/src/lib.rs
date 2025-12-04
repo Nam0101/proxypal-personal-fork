@@ -117,6 +117,12 @@ fn default_config_version() -> u8 {
 pub struct AmpModelMapping {
     pub from: String,
     pub to: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true // Default to enabled for backward compatibility
 }
 
 // OpenAI-compatible provider model for Amp routing
@@ -424,11 +430,16 @@ async fn start_proxy(
     // Build amp model-mappings section if configured
     // Model mappings route Amp model requests to other models available in the proxy
     // (e.g., from: claude-opus-4-5-20251101 -> to: copilot-gpt-5-mini)
-    let amp_model_mappings_section = if config.amp_model_mappings.is_empty() {
+    // Only include mappings that are enabled
+    let enabled_mappings: Vec<_> = config.amp_model_mappings.iter()
+        .filter(|m| m.enabled)
+        .collect();
+    
+    let amp_model_mappings_section = if enabled_mappings.is_empty() {
         "  # model-mappings:  # Optional: map Amp model requests to different models\n  #   - from: claude-opus-4-5-20251101\n  #     to: your-preferred-model".to_string()
     } else {
         let mut mappings = String::from("  model-mappings:");
-        for mapping in &config.amp_model_mappings {
+        for mapping in &enabled_mappings {
             mappings.push_str(&format!("\n    - from: {}\n      to: {}", mapping.from, mapping.to));
         }
         mappings

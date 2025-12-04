@@ -1,0 +1,13 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="c-cut-icon">
+      <rect width="120" height="120" fill="white"/>
+      <rect x="60" y="36" width="24" height="48" fill="black" />
+    </mask>
+  </defs>
+  <g mask="url(#c-cut-icon)">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M12 12H108V108H12V12ZM36 36H84V84H36V36Z" fill="#10B981"/>
+  </g>
+  <path d="M60 36L84 12H108L84 36H60Z" fill="#10B981"/>
+  <path d="M60 84L84 108H108L84 84H60Z" fill="#10B981"/>
+</svg>

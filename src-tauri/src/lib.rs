@@ -1580,12 +1580,24 @@ async fn detect_copilot_api(app: tauri::AppHandle) -> Result<CopilotApiDetection
     // Derive npm/npx paths from node path (handle Windows and Unix paths)
     let npx_bin = node_bin.as_ref().map(|n| {
         if cfg!(target_os = "windows") {
-            n.replace("\\node.exe", "\\npx.cmd")
-                .replace("/node.exe", "/npx.cmd")
-                .replace("\\node", "\\npx")
-                .replace("/node", "/npx")
+            if n == "node" || n == "node.exe" {
+                "npx.cmd".to_string()
+            } else {
+                n.replace("\\node.exe", "\\npx.cmd")
+                    .replace("/node.exe", "/npx.cmd")
+                    .replace("\\node", "\\npx")
+                    .replace("/node", "/npx")
+            }
         } else {
-            n.replace("/node", "/npx")
+            let n_trimmed = n.trim();
+            if n_trimmed == "node" {
+                "npx".to_string()
+            } else if n_trimmed.ends_with("/node") {
+                format!("{}/npx", &n_trimmed[..n_trimmed.len() - 5])
+            } else {
+                // Fallback: npx should be alongside node
+                "npx".to_string()
+            }
         }
     }).unwrap_or_else(|| if cfg!(target_os = "windows") { "npx.cmd".to_string() } else { "npx".to_string() });
     

@@ -371,6 +371,11 @@ pub struct RequestHistory {
     pub total_tokens_in: u64,
     pub total_tokens_out: u64,
     pub total_cost_usd: f64,
+    /// Token time-series data synced from CLIProxyAPI
+    #[serde(default)]
+    pub tokens_by_day: Vec<TimeSeriesPoint>,
+    #[serde(default)]
+    pub tokens_by_hour: Vec<TimeSeriesPoint>,
 }
 
 // Load request history from file
@@ -2267,6 +2272,18 @@ fn get_usage_stats() -> UsageStats {
         tokens_by_hour = tokens_by_hour.split_off(tokens_by_hour.len() - 24);
     }
     
+    // Use synced token time-series from CLIProxyAPI if available (more accurate than request-level data)
+    let final_tokens_by_day = if !history.tokens_by_day.is_empty() {
+        history.tokens_by_day.clone()
+    } else {
+        tokens_by_day
+    };
+    let final_tokens_by_hour = if !history.tokens_by_hour.is_empty() {
+        history.tokens_by_hour.clone()
+    } else {
+        tokens_by_hour
+    };
+    
     // Build model usage stats
     let mut model_map: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
     for req in &history.requests {
@@ -2292,9 +2309,9 @@ fn get_usage_stats() -> UsageStats {
         tokens_today,
         models,
         requests_by_day,
-        tokens_by_day,
+        tokens_by_day: final_tokens_by_day,
         requests_by_hour,
-        tokens_by_hour,
+        tokens_by_hour: final_tokens_by_hour,
     }
 }
 
@@ -2404,11 +2421,48 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
         total_cost += estimate_request_cost(model_name, *input as u32, *output as u32);
     }
     
+    // Extract time-series token data from CLIProxyAPI response
+    // Structure: { "usage": { "tokens_by_day": {"2024-01-15": 1234, ...}, "tokens_by_hour": {"00": 100, ...} } }
+    let mut tokens_by_day: Vec<TimeSeriesPoint> = Vec::new();
+    let mut tokens_by_hour: Vec<TimeSeriesPoint> = Vec::new();
+    
+    if let Some(tbd) = usage.get("tokens_by_day").and_then(|v| v.as_object()) {
+        for (day, value) in tbd {
+            if let Some(v) = value.as_u64() {
+                tokens_by_day.push(TimeSeriesPoint {
+                    label: day.clone(),
+                    value: v,
+                });
+            }
+        }
+        tokens_by_day.sort_by(|a, b| a.label.cmp(&b.label));
+        if tokens_by_day.len() > 14 {
+            tokens_by_day = tokens_by_day.split_off(tokens_by_day.len() - 14);
+        }
+    }
+    
+    if let Some(tbh) = usage.get("tokens_by_hour").and_then(|v| v.as_object()) {
+        for (hour, value) in tbh {
+            if let Some(v) = value.as_u64() {
+                tokens_by_hour.push(TimeSeriesPoint {
+                    label: hour.clone(),
+                    value: v,
+                });
+            }
+        }
+        tokens_by_hour.sort_by(|a, b| a.label.cmp(&b.label));
+        if tokens_by_hour.len() > 24 {
+            tokens_by_hour = tokens_by_hour.split_off(tokens_by_hour.len() - 24);
+        }
+    }
+    
     // Update local history with synced data
     let mut history = load_request_history();
     history.total_tokens_in = total_input;
     history.total_tokens_out = total_output;
     history.total_cost_usd = total_cost;
+    history.tokens_by_day = tokens_by_day;
+    history.tokens_by_hour = tokens_by_hour;
     
     // Save updated history
     save_request_history(&history)?;

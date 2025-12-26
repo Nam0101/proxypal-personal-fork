@@ -112,8 +112,16 @@ jobs:
       - name: Download CLIProxyAPI binary
         shell: bash
         run: |
+          set -e
           mkdir -p src-tauri/binaries
-          VERSION=$(curl -s https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+
+          # Get version with fallback
+          VERSION=$(curl -s https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/' || echo "")
+          if [ -z "$VERSION" ]; then
+            VERSION="6.6.56"
+            echo "Using fallback version: $VERSION"
+          fi
+          echo "CLIProxyAPI version: $VERSION"
 
           case "${{ matrix.target }}" in
             aarch64-apple-darwin)
@@ -132,10 +140,15 @@ jobs:
               ASSET="CLIProxyAPI_${VERSION}_windows_amd64.zip"
               BINARY="cliproxyapi-x86_64-pc-windows-msvc.exe"
               ;;
+            *)
+              echo "Unknown target: ${{ matrix.target }}"
+              exit 1
+              ;;
           esac
 
-          echo "Downloading $ASSET..."
-          curl -L -o /tmp/cliproxyapi.archive "https://github.com/router-for-me/CLIProxyAPI/releases/download/v${VERSION}/${ASSET}"
+          URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${VERSION}/${ASSET}"
+          echo "Downloading $ASSET from $URL..."
+          curl -L -f -o /tmp/cliproxyapi.archive "$URL"
 
           cd /tmp
           if [[ "$ASSET" == *.zip ]]; then
@@ -149,8 +162,13 @@ jobs:
             chmod +x "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
           elif [ -f "CLIProxyAPI.exe" ]; then
             cp CLIProxyAPI.exe "$GITHUB_WORKSPACE/src-tauri/binaries/$BINARY"
+          else
+            echo "Binary not found in archive!"
+            ls -la
+            exit 1
           fi
 
+          echo "Downloaded binary:"
           ls -la "$GITHUB_WORKSPACE/src-tauri/binaries/"
 
       - name: Build Tauri app

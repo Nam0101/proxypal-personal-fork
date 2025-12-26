@@ -4444,6 +4444,13 @@ export AMP_API_KEY="proxypal-local"
                     model_config["interleaved"] = serde_json::json!({
                         "field": "reasoning_content"
                     });
+                    // Enable extended thinking with budget_tokens parameter
+                    model_config["options"] = serde_json::json!({
+                        "thinking": {
+                            "type": "enabled",
+                            "budget_tokens": thinking_budget
+                        }
+                    });
                 } else if is_gpt5_model && user_reasoning_effort != "none" {
                     // Add reasoning effort for GPT-5.x models (Codex)
                     model_config["reasoning"] = serde_json::json!(true);
